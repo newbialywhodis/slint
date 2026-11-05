@@ -268,8 +268,13 @@ impl Connection {
         &mut self,
         message: DebuggerToPreviewMessage,
     ) -> Result<(), String> {
-        let &DebuggerToPreviewMessage::SystemTestRequest { id, .. } = &message;
-        if self.pending_requests.as_ref().is_some_and(|pending| pending.ids.contains(&id)) {
+        let request_id = match &message {
+            DebuggerToPreviewMessage::SystemTestRequest { id, .. } => Some(*id),
+            DebuggerToPreviewMessage::SetInspectMode { .. } => None,
+        };
+        if let (Some(pending), Some(id)) = (&self.pending_requests, request_id)
+            && pending.ids.contains(&id)
+        {
             return Err(format!("The request with ID {id} is still unanswered"));
         }
         match &self.preview {
@@ -283,7 +288,7 @@ impl Connection {
             }
             _ => return Err("No preview is running".into()),
         }
-        if let Some(pending) = &mut self.pending_requests {
+        if let (Some(pending), Some(id)) = (&mut self.pending_requests, request_id) {
             pending.ids.insert(id);
         }
         Ok(())
