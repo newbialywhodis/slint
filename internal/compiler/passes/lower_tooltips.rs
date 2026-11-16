@@ -238,11 +238,8 @@ fn wire_anchored_tooltip_placement(popup: &ElementRc, anchor: &ElementRc) {
     };
     let offset = property(anchor, OFFSET);
     let height = property(popup, HEIGHT);
-    let above = binary(
-        Expression::NumberLiteral(0., Unit::Px),
-        '-',
-        binary(height, '+', offset.clone()),
-    );
+    let above =
+        binary(Expression::NumberLiteral(0., Unit::Px), '-', binary(height, '+', offset.clone()));
     let absolute_y = Expression::StructFieldAccess {
         base: Box::new(property(anchor, "absolute-position")),
         name: "y".into(),

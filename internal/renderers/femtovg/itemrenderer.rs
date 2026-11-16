@@ -14,8 +14,8 @@ use i_slint_core::graphics::euclid::{self};
 use i_slint_core::graphics::rendering_metrics_collector::RenderingMetrics;
 use i_slint_core::graphics::{IntRect, Point, Size};
 use i_slint_core::item_rendering::{
-    BorderRectLayout, CachedRenderingData, ItemCache, ItemRenderer, RenderBorderRectangle, RenderImage,
-    RenderRectangle, RenderText,
+    BorderRectLayout, CachedRenderingData, ItemCache, ItemRenderer, RenderBorderRectangle,
+    RenderImage, RenderRectangle, RenderText,
 };
 use i_slint_core::item_tree::ParentItemTraversalMode;
 use i_slint_core::items::{
@@ -365,7 +365,8 @@ impl<'a, R: femtovg::Renderer + TextureImporter> ItemRenderer for GLItemRenderer
         // Snap the origin, not the alignment anchor: an odd-sized centered item
         // otherwise leaves a half-pixel translation, splitting NEAREST-sampled
         // glyphs along the diagonal between their two triangles.
-        let restore = Self::pixel_align_origin(&mut self.canvas.borrow_mut(), PhysicalPoint::zero());
+        let restore =
+            Self::pixel_align_origin(&mut self.canvas.borrow_mut(), PhysicalPoint::zero());
         sharedparley::draw_text(self, text, Some(self_rc), size, Some(self.text_layout_cache));
         if restore {
             self.canvas.borrow_mut().restore();
@@ -378,7 +379,8 @@ impl<'a, R: femtovg::Renderer + TextureImporter> ItemRenderer for GLItemRenderer
         self_rc: &ItemRc,
         size: LogicalSize,
     ) {
-        let restore = Self::pixel_align_origin(&mut self.canvas.borrow_mut(), PhysicalPoint::zero());
+        let restore =
+            Self::pixel_align_origin(&mut self.canvas.borrow_mut(), PhysicalPoint::zero());
         sharedparley::draw_text_input(self, text_input, self_rc, size, self.text_layout_cache);
         if restore {
             self.canvas.borrow_mut().restore();
@@ -1157,7 +1159,9 @@ impl<R: femtovg::Renderer + TextureImporter> GLItemRenderer<'_, R> {
                 &renderer.window().window_adapter(),
             )
             .intersection(
-                &renderer.get_current_clip().union(&LogicalRect::from_size(item_rc.geometry().size)),
+                &renderer
+                    .get_current_clip()
+                    .union(&LogicalRect::from_size(item_rc.geometry().size)),
             )
             .unwrap_or_default()
         };
