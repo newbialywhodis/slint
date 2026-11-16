@@ -2011,7 +2011,10 @@ impl WinitWindowAdapter {
     pub(crate) fn is_minimized_on_screen(&self) -> bool {
         let minimized =
             self.winit_window().is_some_and(|window| window.is_minimized() == Some(true));
-        if minimized != self.window().is_minimized() {
+        // Compare with the last applied/observed state, not the UI property:
+        // a .slint assignment is applied by a deferred property update. Polling
+        // before that update must not overwrite a pending minimize or restore.
+        if minimized != self.minimized.get() {
             self.window_state_event();
         }
         minimized
