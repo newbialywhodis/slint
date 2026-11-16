@@ -14,8 +14,8 @@ use i_slint_core::graphics::euclid::{self};
 use i_slint_core::graphics::rendering_metrics_collector::RenderingMetrics;
 use i_slint_core::graphics::{IntRect, Point, Size};
 use i_slint_core::item_rendering::{
-    BorderRectLayout, CachedRenderingData, ItemCache, ItemRenderer, LayerRenderer,
-    RenderBorderRectangle, RenderImage, RenderRectangle, RenderText,
+    BorderRectLayout, CachedRenderingData, ItemCache, ItemRenderer, RenderBorderRectangle, RenderImage,
+    RenderRectangle, RenderText,
 };
 use i_slint_core::item_tree::ParentItemTraversalMode;
 use i_slint_core::items::{
@@ -732,8 +732,7 @@ impl<'a, R: femtovg::Renderer + TextureImporter> ItemRenderer for GLItemRenderer
         }
 
         if !clip_radius.is_zero() {
-            if let Some((layer_origin, layer_image)) =
-                i_slint_core::item_rendering::render_layer(self, item_rc)
+            if let Some((layer_origin, layer_image)) = self.render_layer(item_rc)
                 && let Some(layer_image_size) = layer_image.size()
             {
                 let layer_image_width = layer_image_size.width as f32;
@@ -1142,19 +1141,45 @@ impl<'a, R: femtovg::Renderer + TextureImporter> GlyphRenderer for GLItemRendere
     }
 }
 
-impl<'a, R: femtovg::Renderer + TextureImporter> LayerRenderer<'a> for GLItemRenderer<'a, R> {
-    type LayerTarget = Rc<Texture<R>>;
-    type Image = Rc<Texture<R>>;
+impl<R: femtovg::Renderer + TextureImporter> GLItemRenderer<'_, R> {
+    // Keep the layer's raster origin on the same physical pixel grid when its
+    // bounds change (e.g. a newly visible backdrop blur adds its sampling margin).
+    // Rounding only the final blit makes fractional layer origins shift images
+    // and glyphs, which are themselves pixel-aligned while rendering the layer.
+    // This follows core::item_rendering::render_layer, with outward-rounded bounds;
+    // the pinned LayerRenderer API has no hook to adjust bounds before allocation.
+    fn render_layer(&mut self, item_rc: &ItemRc) -> Option<(PhysicalPoint, Rc<Texture<R>>)> {
+        let cache = self.layer_cache;
+        let scale_factor = self.scale_factor;
+        let compute_bounds = |renderer: &Self| {
+            i_slint_core::item_rendering::item_children_bounding_rect(
+                item_rc,
+                &renderer.window().window_adapter(),
+            )
+            .intersection(
+                &renderer.get_current_clip().union(&LogicalRect::from_size(item_rc.geometry().size)),
+            )
+            .unwrap_or_default()
+        };
 
-    fn layer_cache(&self) -> &'a ItemCache<Option<(PhysicalPoint, Self::Image)>> {
-        self.layer_cache
+        cache.get_or_update_cache_entry(item_rc, || {
+            let bounds = i_slint_core::properties::evaluate_no_tracking(|| compute_bounds(self));
+            let physical_bounds = (bounds * scale_factor).round_out();
+            let Some(target) = self.create_layer_target(item_rc, physical_bounds.size) else {
+                // No children ran: retain dependencies so a zero-sized layer can recover.
+                let _ = compute_bounds(self);
+                return None;
+            };
+            let image = self.render_into_layer(target, item_rc, physical_bounds / scale_factor);
+            Some((physical_bounds.origin, image))
+        })
     }
 
     fn create_layer_target(
         &mut self,
         item_rc: &ItemRc,
         physical_size: euclid::Size2D<f32, i_slint_core::lengths::PhysicalPx>,
-    ) -> Option<Self::LayerTarget> {
+    ) -> Option<Rc<Texture<R>>> {
         let size = physical_size.ceil().try_cast::<u32>()?;
 
         // Reuse the previously cached layer texture if its size matches: the
@@ -1177,10 +1202,10 @@ impl<'a, R: femtovg::Renderer + TextureImporter> LayerRenderer<'a> for GLItemRen
 
     fn render_into_layer(
         &mut self,
-        layer_image: Self::LayerTarget,
+        layer_image: Rc<Texture<R>>,
         item_rc: &ItemRc,
         bounding_rect: LogicalRect,
-    ) -> Self::Image {
+    ) -> Rc<Texture<R>> {
         let render_target = layer_image.as_render_target();
         let size = layer_image.size().unwrap_or_default();
         let previous_render_target = self.current_render_target();
@@ -1367,8 +1392,7 @@ impl<'a, R: femtovg::Renderer + TextureImporter> GLItemRenderer<'a, R> {
     }
 
     fn render_and_blend_layer(&mut self, alpha_tint: f32, item_rc: &ItemRc) -> RenderingResult {
-        if let Some((layer_origin, layer_image)) =
-            i_slint_core::item_rendering::render_layer(self, item_rc)
+        if let Some((layer_origin, layer_image)) = self.render_layer(item_rc)
             && let Some(layer_size) = layer_image.size()
         {
             let mut layer_path = femtovg::Path::new();
