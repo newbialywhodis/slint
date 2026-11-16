@@ -3681,6 +3681,9 @@ fn build(l: &mut Loader) {
         /// \group:window
         @is_non_item_type @can_be_declared_without_children_slot
         Tooltip: Empty {
+            /// Center the tooltip above its parent, or below when there is no room above.
+            /// The default retains upstream pointer-relative placement.
+            @constexpr in property <bool> anchor-to-parent: false;
             /// The text to display in the tooltip.
             /// Don't set this property when using custom content.
             in property <styled-text> text;

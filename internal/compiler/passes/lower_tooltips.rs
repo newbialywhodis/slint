@@ -226,6 +226,50 @@ fn wire_tooltip_placement(
     popup_window_rc.borrow_mut().set_binding(SmolStr::new_static("y"), y_binding);
 }
 
+fn wire_anchored_tooltip_placement(popup: &ElementRc, anchor: &ElementRc) {
+    let property = |element, name| {
+        Expression::PropertyReference(NamedReference::new(element, SmolStr::new(name)))
+    };
+    let binary = |lhs, op, rhs| Expression::BinaryExpression {
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        op,
+        source_location: None,
+    };
+    let offset = property(anchor, OFFSET);
+    let height = property(popup, HEIGHT);
+    let above = binary(
+        Expression::NumberLiteral(0., Unit::Px),
+        '-',
+        binary(height, '+', offset.clone()),
+    );
+    let absolute_y = Expression::StructFieldAccess {
+        base: Box::new(property(anchor, "absolute-position")),
+        name: "y".into(),
+    };
+    let x = binary(
+        binary(property(anchor, WIDTH), '-', property(popup, WIDTH)),
+        '/',
+        Expression::NumberLiteral(2., Unit::None),
+    );
+    let y = Expression::Condition {
+        condition: Box::new(binary(
+            binary(absolute_y, '+', above.clone()),
+            '<',
+            Expression::NumberLiteral(0., Unit::Px),
+        )),
+        true_expr: Box::new(binary(property(anchor, HEIGHT), '+', offset)),
+        false_expr: Box::new(above),
+        source_location: None,
+    };
+    // The runtime's existing popup placement shifts overflow back inside the window.
+    for (name, expression) in [("x", x), ("y", y)] {
+        let mut binding: BindingExpression = expression.into();
+        binding.priority = 1;
+        popup.borrow_mut().set_binding(SmolStr::new(name), binding);
+    }
+}
+
 fn wire_tooltip_visibility_behavior(
     elem: &ElementRc,
     tooltip_child_index: usize,
@@ -445,7 +489,25 @@ fn lower_tooltips_in_component(
         };
         let popup_window_rc = popup_window.make_rc();
         bind_popup_effective_size_from_content(&popup_window_rc, &tooltip_content);
-        wire_tooltip_placement(&popup_window_rc, pointer_x, pointer_y, tooltip_offset);
+        let anchored = tooltip_config
+            .borrow()
+            .binding("anchor-to-parent")
+            .map(|binding| match binding.value_expression() {
+                Expression::BoolLiteral(value) => *value,
+                _ => {
+                    diag.push_error(
+                        "anchor-to-parent must be a boolean literal".into(),
+                        &binding.span,
+                    );
+                    false
+                }
+            })
+            .unwrap_or(false);
+        if anchored {
+            wire_anchored_tooltip_placement(&popup_window_rc, &tooltip_area);
+        } else {
+            wire_tooltip_placement(&popup_window_rc, pointer_x, pointer_y, tooltip_offset);
+        }
 
         wire_tooltip_visibility_behavior(elem, tooltip_child_index, &tooltip_area, popup_window_rc);
     });
