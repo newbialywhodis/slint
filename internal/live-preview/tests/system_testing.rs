@@ -3,10 +3,13 @@
 
 #![cfg(feature = "system-testing")]
 
+use i_slint_backend_testing::proto::{self, aut_response::Msg as Resp, request_to_aut::Msg as Req};
 use i_slint_live_preview::protocol::{
     PreviewToDebuggerMessage, PreviewToLsp, PreviewToLspMessage, Result,
 };
 use i_slint_live_preview::system_testing::answer_request;
+use prost::Message;
+use slint_interpreter::ComponentHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -23,20 +26,58 @@ impl PreviewToLsp for CaptureToDebugger {
     }
 }
 
+/// One test, since the testing backend's event loop can only be set up once per process.
 #[test]
-fn answers_on_the_event_loop() {
+fn answers_and_pushes_on_the_event_loop() {
     i_slint_backend_testing::init_integration_test_with_system_time();
+    i_slint_backend_testing::systest::init().unwrap();
     let capture = Rc::new(CaptureToDebugger::default());
     let to_editor: Rc<dyn PreviewToLsp> = capture.clone();
     answer_request(7, vec![0xff], Rc::downgrade(&to_editor));
+    let subscribe_to_window_roots = proto::RequestToAut {
+        msg: Some(Req::RequestSubscribeElementChildren(proto::RequestSubscribeElementChildren {
+            element_handle: None,
+        })),
+    };
+    answer_request(8, subscribe_to_window_roots.encode_to_vec(), Rc::downgrade(&to_editor));
     i_slint_backend_selector::with_global_context(|context| {
         context.spawn_local(async { i_slint_core::api::quit_event_loop().unwrap() }).unwrap();
         context.run_event_loop().unwrap();
     })
     .unwrap();
+    let messages = capture.0.take();
+    let [
+        PreviewToDebuggerMessage::SystemTestResponse { id: 7, response: Ok(response) },
+        PreviewToDebuggerMessage::SystemTestResponse { id: 8, response: Ok(subscribed) },
+    ] = messages.as_slice()
+    else {
+        panic!("expected two responses, got {messages:?}");
+    };
+    assert!(!response.is_empty());
+    let Some(Resp::SubscribeElementChildrenResponse(subscribed)) =
+        proto::AutResponse::decode(&subscribed[..]).unwrap().msg
+    else {
+        panic!("expected a children subscription");
+    };
+
+    let compiled = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(
+        slint_interpreter::Compiler::default().build_from_source(
+            "export component App inherits Window {}".into(),
+            "/app.slint".into(),
+        ),
+    );
+    let app = compiled.component("App").unwrap().create().unwrap();
+    app.show().unwrap();
+    i_slint_core::properties::ChangeTracker::run_change_handlers();
+    let messages = capture.0.take();
+    let [PreviewToDebuggerMessage::SubscriptionNotification { notification }] = messages.as_slice()
+    else {
+        panic!("expected a notification, got {messages:?}");
+    };
+    let notification = proto::SubscriptionNotification::decode(&notification[..]).unwrap();
+    assert_eq!(notification.subscription_id, subscribed.subscription_id);
     assert!(matches!(
-        capture.0.take().as_slice(),
-        [PreviewToDebuggerMessage::SystemTestResponse { id: 7, response: Ok(response) }]
-            if !response.is_empty()
+        notification.msg,
+        Some(proto::subscription_notification::Msg::ChildrenChanged(_))
     ));
 }

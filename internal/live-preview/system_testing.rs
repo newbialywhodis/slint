@@ -7,6 +7,7 @@ use crate::protocol::{PreviewToDebuggerMessage, PreviewToLsp, PreviewToLspMessag
 
 /// Answers a [`crate::protocol::DebuggerToPreviewMessage::SystemTestRequest`]
 /// with a [`PreviewToDebuggerMessage::SystemTestResponse`] through `to_editor`.
+/// The subscriptions the request creates push their changes through `to_editor` too.
 /// Call it on the thread that runs the Slint event loop.
 pub fn answer_request(id: u64, request: Vec<u8>, to_editor: Weak<dyn PreviewToLsp>) {
     if let Err(error) = spawn_answer(id, request, to_editor.clone()) {
@@ -22,17 +23,29 @@ fn spawn_answer(
 ) -> Result<(), String> {
     i_slint_backend_selector::with_global_context(|context| {
         context.spawn_local(async move {
-            let response = i_slint_backend_testing::systest::handle_encoded_request(
-                &request,
-                std::rc::Rc::new(|_| {}),
-            )
-            .await;
+            let sink = forward_notifications(to_editor.clone());
+            let response =
+                i_slint_backend_testing::systest::handle_encoded_request(&request, sink).await;
             send(&to_editor, id, Ok(response));
         })
     })
     .map_err(|error| error.to_string())?
     .map(drop)
     .map_err(|error| error.to_string())
+}
+
+#[cfg(feature = "system-testing")]
+fn forward_notifications(
+    to_editor: Weak<dyn PreviewToLsp>,
+) -> i_slint_backend_testing::systest::NotificationSink {
+    std::rc::Rc::new(move |notification| {
+        let Some(to_editor) = to_editor.upgrade() else { return };
+        to_editor
+            .send(&PreviewToLspMessage::DebuggerMessage(
+                PreviewToDebuggerMessage::SubscriptionNotification { notification },
+            ))
+            .ok();
+    })
 }
 
 #[cfg(not(feature = "system-testing"))]
