@@ -361,13 +361,11 @@ impl<'a, R: femtovg::Renderer + TextureImporter> ItemRenderer for GLItemRenderer
         size: LogicalSize,
         _cache: &CachedRenderingData,
     ) {
-        let (horizontal, vertical) = text.alignment();
-        let anchor = i_slint_core::item_rendering::text_alignment_anchor(
-            size * self.scale_factor,
-            horizontal,
-            vertical,
-        );
-        let restore = Self::pixel_align_origin(&mut self.canvas.borrow_mut(), anchor);
+        // FemtoVG rounds glyph quad positions before applying the canvas transform.
+        // Snap the origin, not the alignment anchor: an odd-sized centered item
+        // otherwise leaves a half-pixel translation, splitting NEAREST-sampled
+        // glyphs along the diagonal between their two triangles.
+        let restore = Self::pixel_align_origin(&mut self.canvas.borrow_mut(), PhysicalPoint::zero());
         sharedparley::draw_text(self, text, Some(self_rc), size, Some(self.text_layout_cache));
         if restore {
             self.canvas.borrow_mut().restore();
@@ -380,12 +378,7 @@ impl<'a, R: femtovg::Renderer + TextureImporter> ItemRenderer for GLItemRenderer
         self_rc: &ItemRc,
         size: LogicalSize,
     ) {
-        let anchor = i_slint_core::item_rendering::text_alignment_anchor(
-            size * self.scale_factor,
-            text_input.horizontal_alignment(),
-            text_input.vertical_alignment(),
-        );
-        let restore = Self::pixel_align_origin(&mut self.canvas.borrow_mut(), anchor);
+        let restore = Self::pixel_align_origin(&mut self.canvas.borrow_mut(), PhysicalPoint::zero());
         sharedparley::draw_text_input(self, text_input, self_rc, size, self.text_layout_cache);
         if restore {
             self.canvas.borrow_mut().restore();
