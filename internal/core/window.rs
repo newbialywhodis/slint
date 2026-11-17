@@ -1869,6 +1869,9 @@ impl WindowInner {
             PopupWindowLocation::ChildWindow(old_location) => {
                 let (old_popup_region, new_popup_region) =
                     popup.properties_tracker.as_ref().evaluate_as_dependency_root(|| {
+                        // The offset was evaluated above, outside this dependency root.
+                        // Subscribe here so changes of the placement update open popups.
+                        (popup.position_access)();
                         let component = ItemTreeRc::borrow_pin(&popup.component);
                         let root_item = component.as_ref().get_item_ref(0);
                         let window_item =
